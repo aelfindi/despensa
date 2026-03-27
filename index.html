@@ -668,7 +668,7 @@ const SERVER_CONFIG_ENDPOINT = '/api/config';
 const TABLE_LIST = 'shopping_list_items';
 const TABLE_INV = 'inventory_items';
 
-let supabase = null;
+let supabaseClient = null;
 let state = {
   lista: [],
   inventario: []
@@ -756,7 +756,7 @@ function saveConfig() {
 function clearConfig() {
   localStorage.removeItem(CONFIG_KEY);
   appConfig.householdId = 'casa-demo';
-  supabase = null;
+  supabaseClient = null;
   state = { lista: [], inventario: [] };
   fillConfigInputs();
   renderAll();
@@ -811,7 +811,7 @@ function updateSyncBadge(status = 'sync') {
 }
 
 function requireConnection() {
-  if (!supabase) {
+  if (!supabaseClient) {
     showToast('Configura Supabase primero');
     showPage('alexa', document.querySelectorAll('.tab')[2]);
     return false;
@@ -825,7 +825,7 @@ function getHouseholdId() {
 
 async function initSupabase() {
   if (!appConfig.url || !appConfig.anonKey) {
-    supabase = null;
+    supabaseClient = null;
     updateSyncBadge('offline');
     showBanner(serverConfigLoaded ? 'Faltan variables de Supabase en Vercel o están vacías.' : 'No se pudo leer la configuración de Vercel en /api/config.', true);
     return;
@@ -833,31 +833,31 @@ async function initSupabase() {
 
   try {
     if (!window.supabase || !window.supabase.createClient) throw new Error('No se cargó supabase-js');
-    supabase = window.supabase.createClient(appConfig.url, appConfig.anonKey);
+    supabaseClient = window.supabase.createClient(appConfig.url, appConfig.anonKey);
     updateSyncBadge('saving');
     await refreshState();
     updateSyncBadge('sync');
     showBanner('Conectado a Supabase con la configuración de Vercel. La lista y el inventario ya son compartidos.', false);
   } catch (error) {
     console.error(error);
-    supabase = null;
+    supabaseClient = null;
     updateSyncBadge('offline');
     showBanner('No se pudo conectar con Supabase. Revisa las variables de Vercel, las tablas y las políticas.', true);
   }
 }
 
 async function refreshState() {
-  if (!supabase) return;
+  if (!supabaseClient) return;
 
   const householdId = getHouseholdId();
 
   const [listRes, invRes] = await Promise.all([
-    supabase
+    supabaseClient
       .from(TABLE_LIST)
       .select('*')
       .eq('household_id', householdId)
       .order('created_at', { ascending: true }),
-    supabase
+    supabaseClient
       .from(TABLE_INV)
       .select('*')
       .eq('household_id', householdId)
@@ -881,7 +881,7 @@ async function addListItem() {
   const qty = parseInt(qtyEl.value, 10) || 1;
 
   updateSyncBadge('saving');
-  const { error } = await supabase.from(TABLE_LIST).insert({
+  const { error } = await supabaseClient.from(TABLE_LIST).insert({
     household_id: getHouseholdId(),
     name,
     qty,
@@ -910,13 +910,13 @@ async function addInvItem() {
 
   updateSyncBadge('saving');
   if (existing) {
-    const { error } = await supabase.from(TABLE_INV)
+    const { error } = await supabaseClient.from(TABLE_INV)
       .update({ qty: existing.qty + qty })
       .eq('id', existing.id);
     if (error) return handleDbError(error);
     showToast('+ ' + qty + ' uds de ' + existing.name);
   } else {
-    const { error } = await supabase.from(TABLE_INV).insert({
+    const { error } = await supabaseClient.from(TABLE_INV).insert({
       household_id: getHouseholdId(),
       name,
       qty,
@@ -939,7 +939,7 @@ async function toggleListItem(id) {
   if (!item) return;
 
   updateSyncBadge('saving');
-  const { error } = await supabase.from(TABLE_LIST)
+  const { error } = await supabaseClient.from(TABLE_LIST)
     .update({ done: !item.done })
     .eq('id', id);
 
@@ -951,7 +951,7 @@ async function toggleListItem(id) {
 async function deleteListItem(id) {
   if (!requireConnection()) return;
   updateSyncBadge('saving');
-  const { error } = await supabase.from(TABLE_LIST).delete().eq('id', id);
+  const { error } = await supabaseClient.from(TABLE_LIST).delete().eq('id', id);
   if (error) return handleDbError(error);
   await refreshState();
   updateSyncBadge('sync');
@@ -961,7 +961,7 @@ async function ensureLowStockListItem(item) {
   const inList = state.lista.find(l => l.name.toLowerCase() === item.name.toLowerCase() && !l.done);
   if (inList) return;
 
-  const { error } = await supabase.from(TABLE_LIST).insert({
+  const { error } = await supabaseClient.from(TABLE_LIST).insert({
     household_id: getHouseholdId(),
     name: item.name,
     qty: 1,
@@ -979,7 +979,7 @@ async function changeInvQty(id, delta) {
 
   const newQty = Math.max(0, item.qty + delta);
   updateSyncBadge('saving');
-  const { error } = await supabase.from(TABLE_INV)
+  const { error } = await supabaseClient.from(TABLE_INV)
     .update({ qty: newQty })
     .eq('id', id);
   if (error) return handleDbError(error);
@@ -999,7 +999,7 @@ async function changeInvQty(id, delta) {
 async function deleteInvItem(id) {
   if (!requireConnection()) return;
   updateSyncBadge('saving');
-  const { error } = await supabase.from(TABLE_INV).delete().eq('id', id);
+  const { error } = await supabaseClient.from(TABLE_INV).delete().eq('id', id);
   if (error) return handleDbError(error);
   await refreshState();
   updateSyncBadge('sync');
@@ -1009,7 +1009,7 @@ async function setThreshold(id, val) {
   if (!requireConnection()) return;
   const threshold = Math.max(1, parseInt(val, 10) || 1);
   updateSyncBadge('saving');
-  const { error } = await supabase.from(TABLE_INV)
+  const { error } = await supabaseClient.from(TABLE_INV)
     .update({ threshold })
     .eq('id', id);
   if (error) return handleDbError(error);
@@ -1022,7 +1022,7 @@ async function clearDone() {
   const doneIds = state.lista.filter(i => i.done).map(i => i.id);
   if (!doneIds.length) return;
   updateSyncBadge('saving');
-  const { error } = await supabase.from(TABLE_LIST).delete().in('id', doneIds);
+  const { error } = await supabaseClient.from(TABLE_LIST).delete().in('id', doneIds);
   if (error) return handleDbError(error);
   await refreshState();
   updateSyncBadge('sync');
@@ -1035,7 +1035,7 @@ async function simulateAlexa() {
   if (!name) return;
 
   updateSyncBadge('saving');
-  const { error } = await supabase.from(TABLE_LIST).insert({
+  const { error } = await supabaseClient.from(TABLE_LIST).insert({
     household_id: getHouseholdId(),
     name,
     qty: 1,
