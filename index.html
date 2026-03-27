@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Despensa</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script type="text/javascript" src="https://gc.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=41EOebIz8h6WPFgHSaxGscEITMS7LSI5Gr1dlN4Zrajsj6y_hilREz0lidmjESvFJ9T3PnyR6FMHCwE102b71FNEHhsWQpUOq2V1spSbD7Fv3JTIPxOdYyjrKpMG-1Xl60Q4HvM9ewK3fHoEeQCI0V-osghTNv1zZrcXR51H_ohXm5jE1AESLHNoteSR2u_xAz7IF5v_sn_-cRYzvsEkGJWNGIr0QDeX8BODYupgoCjGTekuPT6GlwQOqtuOPxbBS5hxqM_yTTHaUR3trcIRSQ" charset="UTF-8"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
     --green: #1D9E75;
@@ -609,21 +609,21 @@
         </svg>
       </div>
       <div>
-        <div class="alexa-title">Conexión con Supabase</div>
-        <div class="alexa-subtitle">Configúrala una vez y quedará lista para subir</div>
+        <div class="alexa-title">Configuración para Vercel</div>
+        <div class="alexa-subtitle">Lee Supabase desde variables del proyecto en Vercel</div>
       </div>
     </div>
 
     <div class="setup-box">
       <div class="setup-label">Configuración</div>
       <div class="config-grid">
-        <input id="supabaseUrlInput" type="text" placeholder="Supabase URL · https://xxxx.supabase.co">
-        <input id="supabaseAnonKeyInput" type="text" placeholder="Supabase anon key">
+        <input id="supabaseUrlInput" type="text" placeholder="Supabase URL" readonly>
+        <input id="supabaseAnonKeyInput" type="text" placeholder="Supabase publishable key" readonly>
         <input id="householdIdInput" type="text" placeholder="Código compartido de casa · ejemplo: casa-fabio">
       </div>
-      <button class="primary-btn" onclick="saveConfig()">Guardar y conectar</button>
-      <button class="secondary-btn" onclick="clearConfig()">Borrar configuración local</button>
-      <div class="small-note">Usad el mismo código de casa en los dos móviles para compartir lista e inventario.</div>
+      <button class="primary-btn" onclick="saveConfig()">Guardar código de casa y conectar</button>
+      <button class="secondary-btn" onclick="reloadServerConfig()">Recargar configuración de Vercel</button>
+      <div class="small-note">La URL y la key se cargan desde variables del proyecto en Vercel. Solo tenéis que compartir el mismo código de casa.</div>
     </div>
 
     <div class="divider"></div>
@@ -635,11 +635,11 @@
       </div>
       <div class="alexa-step">
         <div class="step-num">2</div>
-        <div class="step-text">Pega aquí tu <strong>Project URL</strong>, tu <strong>anon key</strong> y el mismo <strong>código de casa</strong> en ambos dispositivos.</div>
+        <div class="step-text">Configura en Vercel las variables <strong>NEXT_PUBLIC_SUPABASE_URL</strong> y <strong>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY</strong>, y usad el mismo <strong>código de casa</strong> en ambos dispositivos.</div>
       </div>
       <div class="alexa-step">
         <div class="step-num">3</div>
-        <div class="step-text">Sube este archivo a Netlify, Vercel o GitHub Pages. No necesita backend adicional para esta versión.</div>
+        <div class="step-text">Sube esta carpeta a Vercel. Incluye un endpoint <strong>/api/config</strong> para leer la configuración del proyecto.</div>
       </div>
     </div>
 
@@ -663,7 +663,8 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const CONFIG_KEY = 'despensa_supabase_config_v1';
+const CONFIG_KEY = 'despensa_supabase_vercel_config_v1';
+const SERVER_CONFIG_ENDPOINT = '/api/config';
 const TABLE_LIST = 'shopping_list_items';
 const TABLE_INV = 'inventory_items';
 
@@ -678,6 +679,8 @@ let appConfig = {
   anonKey: '',
   householdId: 'casa-demo'
 };
+
+let serverConfigLoaded = false;
 
 function escapeHtml(value) {
   return String(value)
@@ -696,12 +699,40 @@ function normaliseConfig(raw) {
   };
 }
 
-function loadConfig() {
+async function loadConfig() {
   try {
     const saved = localStorage.getItem(CONFIG_KEY);
-    if (saved) appConfig = normaliseConfig(JSON.parse(saved));
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.householdId) appConfig.householdId = parsed.householdId;
+    }
   } catch (e) {}
+  await loadServerConfig();
   fillConfigInputs();
+}
+
+
+async function loadServerConfig() {
+  try {
+    const res = await fetch(SERVER_CONFIG_ENDPOINT, { cache: 'no-store' });
+    if (!res.ok) throw new Error('No se pudo leer /api/config');
+    const data = await res.json();
+    appConfig.url = (data.supabaseUrl || '').trim();
+    appConfig.anonKey = (data.supabaseKey || '').trim();
+    if (!localStorage.getItem(CONFIG_KEY) && data.defaultHouseholdId) {
+      appConfig.householdId = String(data.defaultHouseholdId).trim() || 'casa-demo';
+    }
+    serverConfigLoaded = true;
+  } catch (error) {
+    console.error(error);
+    serverConfigLoaded = false;
+  }
+}
+
+async function reloadServerConfig() {
+  await loadServerConfig();
+  fillConfigInputs();
+  await initSupabase();
 }
 
 function fillConfigInputs() {
@@ -713,24 +744,24 @@ function fillConfigInputs() {
 
 function saveConfig() {
   appConfig = normaliseConfig({
-    url: document.getElementById('supabaseUrlInput').value,
-    anonKey: document.getElementById('supabaseAnonKeyInput').value,
+    url: appConfig.url,
+    anonKey: appConfig.anonKey,
     householdId: document.getElementById('householdIdInput').value
   });
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(appConfig));
+  localStorage.setItem(CONFIG_KEY, JSON.stringify({ householdId: appConfig.householdId }));
   fillConfigInputs();
   initSupabase();
 }
 
 function clearConfig() {
   localStorage.removeItem(CONFIG_KEY);
-  appConfig = { url: '', anonKey: '', householdId: 'casa-demo' };
+  appConfig.householdId = 'casa-demo';
   supabase = null;
   state = { lista: [], inventario: [] };
   fillConfigInputs();
   renderAll();
   updateSyncBadge('offline');
-  showBanner('Configuración borrada. Vuelve a introducir los datos de Supabase.', false);
+  showBanner('Código local borrado. Recarga la configuración de Vercel y vuelve a conectar.', false);
 }
 
 function showBanner(message, isError = false) {
@@ -796,7 +827,7 @@ async function initSupabase() {
   if (!appConfig.url || !appConfig.anonKey) {
     supabase = null;
     updateSyncBadge('offline');
-    showBanner('Introduce tu Supabase URL, anon key y código de casa para activar la sincronización.', false);
+    showBanner(serverConfigLoaded ? 'Faltan variables de Supabase en Vercel o están vacías.' : 'No se pudo leer la configuración de Vercel en /api/config.', true);
     return;
   }
 
@@ -805,12 +836,12 @@ async function initSupabase() {
     updateSyncBadge('saving');
     await refreshState();
     updateSyncBadge('sync');
-    showBanner('Conectado a Supabase. La lista y el inventario ya son compartidos.', false);
+    showBanner('Conectado a Supabase con la configuración de Vercel. La lista y el inventario ya son compartidos.', false);
   } catch (error) {
     console.error(error);
     supabase = null;
     updateSyncBadge('offline');
-    showBanner('No se pudo conectar con Supabase. Revisa URL, anon key y las tablas.', true);
+    showBanner('No se pudo conectar con Supabase. Revisa las variables de Vercel, las tablas y las políticas.', true);
   }
 }
 
@@ -1118,9 +1149,10 @@ function renderAll() {
   renderAlerts();
 }
 
-loadConfig();
-renderAll();
-initSupabase();
+loadConfig().then(() => {
+  renderAll();
+  initSupabase();
+});
 </script>
 </body>
 </html>
