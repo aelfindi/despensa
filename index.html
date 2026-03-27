@@ -555,8 +555,7 @@
   <div class="tabs">
     <div class="tab active" data-page="lista">🛒 Lista</div>
     <div class="tab" data-page="inventario">📦 Inventario</div>
-    <div class="tab" data-page="alexa">⚙️ Config</div>
-  </div>
+      </div>
 </header>
 
 <div id="statusBanner" class="status-banner" style="display:none"></div>
@@ -599,68 +598,9 @@
   </div>
 </div>
 
-<div class="page" id="page-alexa">
-  <div style="height: 8px;"></div>
-  <div class="alexa-section">
-    <div class="alexa-header">
-      <div class="alexa-icon">
-        <svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5z"/>
-        </svg>
-      </div>
-      <div>
-        <div class="alexa-title">Configuración para Vercel</div>
-        <div class="alexa-subtitle">Lee Supabase desde variables del proyecto en Vercel</div>
-      </div>
-    </div>
-
-    <div class="setup-box">
-      <div class="setup-label">Configuración</div>
-      <div class="config-grid">
-        <input id="supabaseUrlInput" type="text" placeholder="Supabase URL" readonly>
-        <input id="supabaseAnonKeyInput" type="text" placeholder="Supabase publishable key" readonly>
-        <input id="householdIdInput" type="text" placeholder="Código compartido de casa · ejemplo: casa-fabio">
-      </div>
-      <button class="primary-btn" id="saveConfigBtn" type="button">Guardar código de casa y conectar</button>
-      <button class="secondary-btn" id="reloadConfigBtn" type="button">Recargar configuración de Vercel</button>
-      <div class="small-note">La URL y la key se cargan desde variables del proyecto en Vercel. Solo tenéis que compartir el mismo código de casa.</div>
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="alexa-steps">
-      <div class="alexa-step">
-        <div class="step-num">1</div>
-        <div class="step-text">Crea en Supabase dos tablas públicas: <strong>shopping_list_items</strong> e <strong>inventory_items</strong>.</div>
-      </div>
-      <div class="alexa-step">
-        <div class="step-num">2</div>
-        <div class="step-text">Configura en Vercel las variables <strong>NEXT_PUBLIC_SUPABASE_URL</strong> y <strong>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY</strong>, y usad el mismo <strong>código de casa</strong> en ambos dispositivos.</div>
-      </div>
-      <div class="alexa-step">
-        <div class="step-num">3</div>
-        <div class="step-text">Sube esta carpeta a Vercel. Incluye un endpoint <strong>/api/config</strong> para leer la configuración del proyecto.</div>
-      </div>
-    </div>
-
-    <div class="webhook-box">
-      <div class="webhook-label">Ejemplo de código de casa compartido</div>
-      <div class="webhook-url" id="webhookUrl">casa-fabio</div>
-      <button class="copy-btn" id="copyHouseholdBtn" type="button">Copiar código</button>
-    </div>
-
-    <div class="divider"></div>
-
-    <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px;">Simula una entrada de voz:</div>
-    <div class="add-form" style="border: 1px dashed var(--gray-border); background: var(--gray-bg);">
-      <span style="font-size: 16px;">🎤</span>
-      <input type="text" id="alexaSimInput" placeholder='ej: "leche"' autocomplete="off" onkeydown="if(event.key==='Enter') simulateAlexa()">
-      <button class="add-btn" style="background: #1a73e8;" id="simulateAlexaBtn" type="button">+</button>
-    </div>
-  </div>
-</div>
-
 <div class="toast" id="toast"></div>
+
+
 
 <script>
 const CONFIG_KEY = 'despensa_supabase_vercel_config_v1';
@@ -736,17 +676,22 @@ async function reloadServerConfig() {
 }
 
 function fillConfigInputs() {
-  document.getElementById('supabaseUrlInput').value = appConfig.url || '';
-  document.getElementById('supabaseAnonKeyInput').value = appConfig.anonKey || '';
-  document.getElementById('householdIdInput').value = appConfig.householdId || 'casa-demo';
-  document.getElementById('webhookUrl').textContent = appConfig.householdId || 'casa-demo';
+  const urlInput = document.getElementById('supabaseUrlInput');
+  const keyInput = document.getElementById('supabaseAnonKeyInput');
+  const householdInput = document.getElementById('householdIdInput');
+  const webhookEl = document.getElementById('webhookUrl');
+  if (urlInput) urlInput.value = appConfig.url || '';
+  if (keyInput) keyInput.value = appConfig.anonKey || '';
+  if (householdInput) householdInput.value = appConfig.householdId || 'casa-demo';
+  if (webhookEl) webhookEl.textContent = appConfig.householdId || 'casa-demo';
 }
 
 function saveConfig() {
+  const householdInput = document.getElementById('householdIdInput');
   appConfig = normaliseConfig({
     url: appConfig.url,
     anonKey: appConfig.anonKey,
-    householdId: document.getElementById('householdIdInput').value
+    householdId: householdInput ? householdInput.value : appConfig.householdId
   });
   localStorage.setItem(CONFIG_KEY, JSON.stringify({ householdId: appConfig.householdId }));
   fillConfigInputs();
@@ -1177,10 +1122,10 @@ function bindStaticEvents() {
   document.getElementById('addListBtn').addEventListener('click', addListItem);
   document.getElementById('addInvBtn').addEventListener('click', addInvItem);
   document.getElementById('clearDoneBtn').addEventListener('click', clearDone);
-  document.getElementById('saveConfigBtn').addEventListener('click', saveConfig);
-  document.getElementById('reloadConfigBtn').addEventListener('click', reloadServerConfig);
-  document.getElementById('copyHouseholdBtn').addEventListener('click', copyHouseholdCode);
-  document.getElementById('simulateAlexaBtn').addEventListener('click', simulateAlexa);
+  const saveBtn = document.getElementById('saveConfigBtn'); if (saveBtn) saveBtn.addEventListener('click', saveConfig);
+  const reloadBtn = document.getElementById('reloadConfigBtn'); if (reloadBtn) reloadBtn.addEventListener('click', reloadServerConfig);
+  const copyBtn = document.getElementById('copyHouseholdBtn'); if (copyBtn) copyBtn.addEventListener('click', copyHouseholdCode);
+  const simulateBtn = document.getElementById('simulateAlexaBtn'); if (simulateBtn) simulateBtn.addEventListener('click', simulateAlexa);
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
