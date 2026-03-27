@@ -467,6 +467,67 @@
     line-height: 1.5;
   }
 
+
+  .voice-box {
+    margin-top: 12px;
+    background: var(--white);
+    border: 1px solid var(--gray-border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+  }
+
+  .voice-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .voice-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: var(--green);
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .voice-btn.listening {
+    background: var(--red);
+    animation: pulse 1.2s infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(163,45,45,0.35); }
+    70% { transform: scale(1.03); box-shadow: 0 0 0 10px rgba(163,45,45,0); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(163,45,45,0); }
+  }
+
+  .voice-copy {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .voice-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .voice-hint,
+  .voice-result {
+    margin-top: 3px;
+    font-size: 12px;
+    color: var(--gray-text);
+    line-height: 1.4;
+  }
+
+  .voice-result strong {
+    color: var(--text);
+  }
+
   .bottom-nav {
     position: fixed;
     bottom: 0;
@@ -570,6 +631,17 @@
     <button class="add-btn" id="addListBtn" type="button">+</button>
   </div>
 
+  <div class="voice-box">
+    <div class="voice-row">
+      <button class="voice-btn" id="voiceAddBtn" type="button" aria-label="Añadir por voz">🎤</button>
+      <div class="voice-copy">
+        <div class="voice-title">Añadir por voz</div>
+        <div class="voice-hint" id="voiceHint">Di por ejemplo: “añade leche” o “añade 2 pastas”.</div>
+        <div class="voice-result" id="voiceResult"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="section-title">Por comprar</div>
   <div class="card" id="listContainer">
     <div class="empty-state">
@@ -622,6 +694,15 @@ let appConfig = {
 
 let serverConfigLoaded = false;
 
+let speechRecognition = null;
+let isListening = false;
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+const NUMBER_WORDS = {
+  un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
+  seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10
+};
+
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -637,6 +718,141 @@ function normaliseConfig(raw) {
     anonKey: (raw?.anonKey || '').trim(),
     householdId: (raw?.householdId || 'casa-demo').trim() || 'casa-demo'
   };
+}
+
+
+function setVoiceUi(listening, hint, result = '') {
+  const btn = document.getElementById('voiceAddBtn');
+  const hintEl = document.getElementById('voiceHint');
+  const resultEl = document.getElementById('voiceResult');
+  if (btn) {
+    btn.classList.toggle('listening', listening);
+    btn.textContent = listening ? '■' : '🎤';
+  }
+  if (hintEl && hint) hintEl.textContent = hint;
+  if (resultEl) resultEl.innerHTML = result;
+}
+
+function normaliseTranscript(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[.,;:!?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseVoiceCommand(transcript) {
+  const clean = normaliseTranscript(transcript);
+  if (!clean) return null;
+
+  let work = clean
+    .replace(/^(anade|agrega|pon|mete|compra|necesito|falta|apunta)\s+/, '')
+    .replace(/^(en la lista\s+)?(de )?compra\s+/, '')
+    .replace(/\s+(a la lista|en la lista|para la lista|de compra)$/g, '')
+    .trim();
+
+  let qty = 1;
+  const digitMatch = work.match(/^(\d+)\s+(.*)$/);
+  if (digitMatch) {
+    qty = Math.max(1, parseInt(digitMatch[1], 10) || 1);
+    work = digitMatch[2].trim();
+  } else {
+    const wordMatch = work.match(/^(un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(.*)$/);
+    if (wordMatch) {
+      qty = NUMBER_WORDS[wordMatch[1]] || 1;
+      work = wordMatch[2].trim();
+    }
+  }
+
+  work = work
+    .replace(/^(paquete|paquetes|unidad|unidades|bote|botes|lata|latas|botella|botellas|caja|cajas)\s+/, '')
+    .trim();
+
+  if (!work) return null;
+  return { name: work, qty, transcript: transcript.trim() };
+}
+
+async function addVoiceListItem(name, qty, transcript) {
+  const nameEl = document.getElementById('listInput');
+  const qtyEl = document.getElementById('listQtyInput');
+  if (nameEl) nameEl.value = name;
+  if (qtyEl) qtyEl.value = String(qty || 1);
+  setVoiceUi(false, 'Di por ejemplo: “añade leche” o “añade 2 pastas”.', '<strong>Oído:</strong> ' + escapeHtml(transcript));
+  isListening = false;
+  await addListItem(true);
+}
+
+function initVoiceRecognition() {
+  if (!SpeechRecognitionCtor) {
+    setVoiceUi(false, 'Tu navegador no soporta reconocimiento de voz. Prueba con Chrome o Edge.', '');
+    return;
+  }
+  speechRecognition = new SpeechRecognitionCtor();
+  speechRecognition.lang = 'es-ES';
+  speechRecognition.interimResults = false;
+  speechRecognition.maxAlternatives = 1;
+
+  speechRecognition.onstart = () => {
+    isListening = true;
+    setVoiceUi(true, 'Escuchando… habla ahora.', '');
+  };
+
+  speechRecognition.onresult = async (event) => {
+    const transcript = event.results?.[0]?.[0]?.transcript || '';
+    const parsed = parseVoiceCommand(transcript);
+    if (!parsed) {
+      isListening = false;
+      setVoiceUi(false, 'No entendí el producto. Intenta decir “añade leche”.', '<strong>Oído:</strong> ' + escapeHtml(transcript));
+      showToast('No entendí el producto');
+      return;
+    }
+    try {
+      await addVoiceListItem(parsed.name, parsed.qty, parsed.transcript);
+      showToast('🔊 Añadido por voz: ' + parsed.name);
+    } catch (error) {
+      console.error(error);
+      handleDbError(error);
+    }
+  };
+
+  speechRecognition.onerror = (event) => {
+    isListening = false;
+    let msg = 'No se pudo usar el micrófono.';
+    if (event.error === 'not-allowed') msg = 'Permite el micrófono en el navegador para usar la voz.';
+    if (event.error === 'no-speech') msg = 'No se oyó nada. Vuelve a intentarlo.';
+    if (event.error === 'network') msg = 'Error de red del reconocimiento de voz.';
+    setVoiceUi(false, msg, '');
+  };
+
+  speechRecognition.onend = () => {
+    if (isListening) {
+      isListening = false;
+      setVoiceUi(false, 'Di por ejemplo: “añade leche” o “añade 2 pastas”.', document.getElementById('voiceResult')?.innerHTML || '');
+    }
+  };
+}
+
+function toggleVoiceRecognition() {
+  if (!SpeechRecognitionCtor) {
+    showToast('Tu navegador no soporta voz');
+    setVoiceUi(false, 'Tu navegador no soporta reconocimiento de voz. Prueba con Chrome o Edge.', '');
+    return;
+  }
+  if (!requireConnection()) return;
+  if (!speechRecognition) initVoiceRecognition();
+  if (isListening) {
+    isListening = false;
+    speechRecognition.stop();
+    return;
+  }
+  try {
+    speechRecognition.start();
+  } catch (error) {
+    console.error(error);
+    showToast('No se pudo iniciar el micrófono');
+  }
 }
 
 async function loadConfig() {
@@ -817,7 +1033,7 @@ async function refreshState() {
   renderAll();
 }
 
-async function addListItem() {
+async function addListItem(skipToast = false) {
   if (!requireConnection()) return;
   const nameEl = document.getElementById('listInput');
   const qtyEl = document.getElementById('listQtyInput');
@@ -841,7 +1057,7 @@ async function addListItem() {
   nameEl.value = '';
   qtyEl.value = '1';
   nameEl.focus();
-  showToast('✓ Añadido: ' + name);
+  if (!skipToast) showToast('✓ Añadido: ' + name);
 }
 
 async function addInvItem() {
@@ -1122,6 +1338,7 @@ function bindStaticEvents() {
   document.getElementById('addListBtn').addEventListener('click', addListItem);
   document.getElementById('addInvBtn').addEventListener('click', addInvItem);
   document.getElementById('clearDoneBtn').addEventListener('click', clearDone);
+  const voiceBtn = document.getElementById('voiceAddBtn'); if (voiceBtn) voiceBtn.addEventListener('click', toggleVoiceRecognition);
   const saveBtn = document.getElementById('saveConfigBtn'); if (saveBtn) saveBtn.addEventListener('click', saveConfig);
   const reloadBtn = document.getElementById('reloadConfigBtn'); if (reloadBtn) reloadBtn.addEventListener('click', reloadServerConfig);
   const copyBtn = document.getElementById('copyHouseholdBtn'); if (copyBtn) copyBtn.addEventListener('click', copyHouseholdCode);
@@ -1131,6 +1348,7 @@ function bindStaticEvents() {
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     bindStaticEvents();
+    initVoiceRecognition();
     renderAll();
     await loadConfig();
     await initSupabase();
