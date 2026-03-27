@@ -643,6 +643,7 @@
   </div>
 
   <div class="section-title">Por comprar</div>
+  <div style="font-size:12px;color:var(--gray-text);margin:-6px 0 10px 2px;">Selecciona varios productos y pásalos al inventario o elimínalos.</div>
   <div class="card" id="listContainer">
     <div class="empty-state">
       <span class="icon">✓</span>
@@ -650,7 +651,10 @@
     </div>
   </div>
 
-  <button class="clear-done-btn" id="clearDoneBtn" type="button">Eliminar marcados</button>
+  <div style="display:flex; gap:10px; margin-top:16px;">
+  <button class="clear-done-btn" id="addSelectedToInventoryBtn" type="button" style="background:var(--green); color:white; border-color:var(--green);">Añadir seleccionados al inventario</button>
+  <button class="clear-done-btn" id="clearDoneBtn" type="button">Eliminar seleccionados</button>
+</div>
 </div>
 
 <div class="page" id="page-inventario">
@@ -1181,12 +1185,65 @@ async function setThreshold(id, val) {
 async function clearDone() {
   if (!requireConnection()) return;
   const doneIds = state.lista.filter(i => i.done).map(i => i.id);
-  if (!doneIds.length) return;
+  if (!doneIds.length) {
+    showToast('Selecciona al menos un producto');
+    return;
+  }
   updateSyncBadge('saving');
   const { error } = await supabaseClient.from(TABLE_LIST).delete().in('id', doneIds);
   if (error) return handleDbError(error);
   await refreshState();
   updateSyncBadge('sync');
+  showToast('🗑️ Seleccionados eliminados');
+}
+
+async function addSelectedToInventory() {
+  if (!requireConnection()) return;
+  const selected = state.lista.filter(i => i.done);
+  if (!selected.length) {
+    showToast('Selecciona al menos un producto');
+    return;
+  }
+
+  updateSyncBadge('saving');
+  try {
+    for (const item of selected) {
+      const existing = state.inventario.find(inv => inv.name.toLowerCase() === item.name.toLowerCase());
+      if (existing) {
+        const { error } = await supabaseClient.from(TABLE_INV)
+          .update({ qty: existing.qty + item.qty })
+          .eq('id', existing.id);
+        if (error) throw error;
+        existing.qty += item.qty;
+      } else {
+        const { error } = await supabaseClient.from(TABLE_INV).insert({
+          household_id: getHouseholdId(),
+          name: item.name,
+          qty: item.qty,
+          threshold: 1
+        });
+        if (error) throw error;
+        state.inventario.push({
+          id: 'temp-' + item.id,
+          household_id: getHouseholdId(),
+          name: item.name,
+          qty: item.qty,
+          threshold: 1
+        });
+      }
+    }
+
+    const { error: deleteError } = await supabaseClient.from(TABLE_LIST)
+      .delete()
+      .in('id', selected.map(i => i.id));
+    if (deleteError) throw deleteError;
+
+    await refreshState();
+    updateSyncBadge('sync');
+    showToast('📦 Añadidos al inventario');
+  } catch (error) {
+    handleDbError(error);
+  }
 }
 
 async function simulateAlexa() {
@@ -1256,7 +1313,7 @@ function renderLista() {
 
   container.innerHTML = all.map(item => `
     <div class="item-row">
-      <div class="item-check ${item.done ? 'checked' : ''}" data-action="toggle-list" data-id="${item.id}"></div>
+      <div class="item-check ${item.done ? 'checked' : ''}" data-action="toggle-list" data-id="${item.id}" title="Seleccionar"></div>
       <div style="flex:1; display:flex; align-items:center; gap:6px; min-width:0;">
         <span class="item-name ${item.done ? 'checked-text' : ''}">${escapeHtml(item.name)}</span>
         ${item.from_alexa ? '<span style="font-size:11px;color:#888">🔊</span>' : ''}
@@ -1338,6 +1395,7 @@ function bindStaticEvents() {
   document.getElementById('addListBtn').addEventListener('click', addListItem);
   document.getElementById('addInvBtn').addEventListener('click', addInvItem);
   document.getElementById('clearDoneBtn').addEventListener('click', clearDone);
+  document.getElementById('addSelectedToInventoryBtn').addEventListener('click', addSelectedToInventory);
   const voiceBtn = document.getElementById('voiceAddBtn'); if (voiceBtn) voiceBtn.addEventListener('click', toggleVoiceRecognition);
   const saveBtn = document.getElementById('saveConfigBtn'); if (saveBtn) saveBtn.addEventListener('click', saveConfig);
   const reloadBtn = document.getElementById('reloadConfigBtn'); if (reloadBtn) reloadBtn.addEventListener('click', reloadServerConfig);
