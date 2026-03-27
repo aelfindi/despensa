@@ -553,9 +553,9 @@
     <span class="sync-badge" id="syncBadge">● offline</span>
   </div>
   <div class="tabs">
-    <div class="tab active" onclick="showPage('lista', this)">🛒 Lista</div>
-    <div class="tab" onclick="showPage('inventario', this)">📦 Inventario</div>
-    <div class="tab" onclick="showPage('alexa', this)">⚙️ Config</div>
+    <div class="tab active" data-page="lista">🛒 Lista</div>
+    <div class="tab" data-page="inventario">📦 Inventario</div>
+    <div class="tab" data-page="alexa">⚙️ Config</div>
   </div>
 </header>
 
@@ -568,7 +568,7 @@
   <div class="add-form card">
     <input type="text" id="listInput" placeholder="Nombre del producto…" autocomplete="off" onkeydown="if(event.key==='Enter') addListItem()">
     <input type="number" class="qty-input" id="listQtyInput" placeholder="Uds" min="1" value="1">
-    <button class="add-btn" onclick="addListItem()">+</button>
+    <button class="add-btn" id="addListBtn" type="button">+</button>
   </div>
 
   <div class="section-title">Por comprar</div>
@@ -579,7 +579,7 @@
     </div>
   </div>
 
-  <button class="clear-done-btn" onclick="clearDone()">Eliminar marcados</button>
+  <button class="clear-done-btn" id="clearDoneBtn" type="button">Eliminar marcados</button>
 </div>
 
 <div class="page" id="page-inventario">
@@ -587,7 +587,7 @@
   <div class="add-form card">
     <input type="text" id="invInput" placeholder="Nombre del producto…" autocomplete="off" onkeydown="if(event.key==='Enter') addInvItem()">
     <input type="number" class="qty-input" id="invQtyInput" placeholder="Uds" min="1" value="1">
-    <button class="add-btn" onclick="addInvItem()">+</button>
+    <button class="add-btn" id="addInvBtn" type="button">+</button>
   </div>
 
   <div class="section-title">En la despensa</div>
@@ -621,8 +621,8 @@
         <input id="supabaseAnonKeyInput" type="text" placeholder="Supabase publishable key" readonly>
         <input id="householdIdInput" type="text" placeholder="Código compartido de casa · ejemplo: casa-fabio">
       </div>
-      <button class="primary-btn" onclick="saveConfig()">Guardar código de casa y conectar</button>
-      <button class="secondary-btn" onclick="reloadServerConfig()">Recargar configuración de Vercel</button>
+      <button class="primary-btn" id="saveConfigBtn" type="button">Guardar código de casa y conectar</button>
+      <button class="secondary-btn" id="reloadConfigBtn" type="button">Recargar configuración de Vercel</button>
       <div class="small-note">La URL y la key se cargan desde variables del proyecto en Vercel. Solo tenéis que compartir el mismo código de casa.</div>
     </div>
 
@@ -646,7 +646,7 @@
     <div class="webhook-box">
       <div class="webhook-label">Ejemplo de código de casa compartido</div>
       <div class="webhook-url" id="webhookUrl">casa-fabio</div>
-      <button class="copy-btn" onclick="copyHouseholdCode()">Copiar código</button>
+      <button class="copy-btn" id="copyHouseholdBtn" type="button">Copiar código</button>
     </div>
 
     <div class="divider"></div>
@@ -655,7 +655,7 @@
     <div class="add-form" style="border: 1px dashed var(--gray-border); background: var(--gray-bg);">
       <span style="font-size: 16px;">🎤</span>
       <input type="text" id="alexaSimInput" placeholder='ej: "leche"' autocomplete="off" onkeydown="if(event.key==='Enter') simulateAlexa()">
-      <button class="add-btn" style="background: #1a73e8;" onclick="simulateAlexa()">+</button>
+      <button class="add-btn" style="background: #1a73e8;" id="simulateAlexaBtn" type="button">+</button>
     </div>
   </div>
 </div>
@@ -832,6 +832,7 @@ async function initSupabase() {
   }
 
   try {
+    if (!window.supabase || !window.supabase.createClient) throw new Error('No se cargó supabase-js');
     supabase = window.supabase.createClient(appConfig.url, appConfig.anonKey);
     updateSyncBadge('saving');
     await refreshState();
@@ -1062,6 +1063,25 @@ function handleDbError(error) {
   showToast('Error guardando');
 }
 
+
+document.addEventListener('click', async (event) => {
+  const check = event.target.closest('[data-action="toggle-list"]');
+  if (check) return toggleListItem(Number(check.dataset.id));
+  const delList = event.target.closest('[data-action="delete-list"]');
+  if (delList) return deleteListItem(Number(delList.dataset.id));
+  const dec = event.target.closest('[data-action="dec-inv"]');
+  if (dec) return changeInvQty(Number(dec.dataset.id), -1);
+  const inc = event.target.closest('[data-action="inc-inv"]');
+  if (inc) return changeInvQty(Number(inc.dataset.id), 1);
+  const delInv = event.target.closest('[data-action="delete-inv"]');
+  if (delInv) return deleteInvItem(Number(delInv.dataset.id));
+});
+
+document.addEventListener('change', (event) => {
+  const threshold = event.target.closest('[data-action="threshold-input"]');
+  if (threshold) setThreshold(Number(threshold.dataset.id), threshold.value);
+});
+
 function renderLista() {
   const container = document.getElementById('listContainer');
   const pending = state.lista.filter(i => !i.done);
@@ -1075,14 +1095,14 @@ function renderLista() {
 
   container.innerHTML = all.map(item => `
     <div class="item-row">
-      <div class="item-check ${item.done ? 'checked' : ''}" onclick="toggleListItem(${item.id})"></div>
+      <div class="item-check ${item.done ? 'checked' : ''}" data-action="toggle-list" data-id="${item.id}"></div>
       <div style="flex:1; display:flex; align-items:center; gap:6px; min-width:0;">
         <span class="item-name ${item.done ? 'checked-text' : ''}">${escapeHtml(item.name)}</span>
         ${item.from_alexa ? '<span style="font-size:11px;color:#888">🔊</span>' : ''}
         ${item.auto ? '<span style="font-size:11px;color:var(--amber)">⚠️</span>' : ''}
       </div>
       <span class="item-qty">${item.qty > 1 ? item.qty + ' uds' : ''}</span>
-      <button class="delete-btn" onclick="deleteListItem(${item.id})">×</button>
+      <button class="delete-btn" data-action="delete-list" data-id="${item.id}">×</button>
     </div>
   `).join('');
 }
@@ -1111,15 +1131,15 @@ function renderInventario() {
           </div>
         </div>
         <div class="inv-controls">
-          <button class="ctrl-btn" onclick="changeInvQty(${item.id}, -1)">−</button>
+          <button class="ctrl-btn" data-action="dec-inv" data-id="${item.id}">−</button>
           <span class="inv-qty ${qtyClass}">${item.qty}</span>
-          <button class="ctrl-btn" onclick="changeInvQty(${item.id}, 1)">+</button>
-          <button class="delete-btn" onclick="deleteInvItem(${item.id})" style="margin-left:2px;">×</button>
+          <button class="ctrl-btn" data-action="inc-inv" data-id="${item.id}">+</button>
+          <button class="delete-btn" data-action="delete-inv" data-id="${item.id}" style="margin-left:2px;">×</button>
         </div>
       </div>
       <div class="threshold-row">
         <span class="threshold-label">Alerta cuando queden ≤</span>
-        <input type="number" class="threshold-input" value="${item.threshold}" min="1" onchange="setThreshold(${item.id}, this.value)">
+        <input type="number" class="threshold-input" value="${item.threshold}" min="1" data-action="threshold-input" data-id="${item.id}">
         <span style="font-size:12px; color:var(--gray-text)">uds</span>
       </div>
     `;
@@ -1149,9 +1169,30 @@ function renderAll() {
   renderAlerts();
 }
 
-loadConfig().then(() => {
-  renderAll();
-  initSupabase();
+
+function bindStaticEvents() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => showPage(tab.dataset.page, tab));
+  });
+  document.getElementById('addListBtn').addEventListener('click', addListItem);
+  document.getElementById('addInvBtn').addEventListener('click', addInvItem);
+  document.getElementById('clearDoneBtn').addEventListener('click', clearDone);
+  document.getElementById('saveConfigBtn').addEventListener('click', saveConfig);
+  document.getElementById('reloadConfigBtn').addEventListener('click', reloadServerConfig);
+  document.getElementById('copyHouseholdBtn').addEventListener('click', copyHouseholdCode);
+  document.getElementById('simulateAlexaBtn').addEventListener('click', simulateAlexa);
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    bindStaticEvents();
+    renderAll();
+    await loadConfig();
+    await initSupabase();
+  } catch (error) {
+    console.error(error);
+    showBanner('La app cargó con un error de JavaScript. Usa la versión corregida y revisa la consola del navegador.', true);
+  }
 });
 </script>
 </body>
